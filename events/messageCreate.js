@@ -25,7 +25,7 @@ async function handleTipccDonation(message) {
     // Parse tip.cc message - improved regex pattern
     // This pattern matches tip.cc messages with custom emojis and user mentions
     // Format: <emoji> <@user> sent <@recipient> **amount currency** (≈ $value).
-    const tipRegex = /<[a:]*\w+:\d+>\s*<@!?(\d+)>\s*sent\s*<@!?(\d+)>\s*\*\*([0-9.,]+)\s*(\w+)\*\*/i
+    const tipRegex = /<a?:[^:]+:\d+>\s*<@!?(\d+)>\s*sent\s*<@!?(\d+)>\s*\*\*([0-9.,]+)\s*(\w+)\*\*/i
     const match = message.content.match(tipRegex)
 
     if (!match) {
