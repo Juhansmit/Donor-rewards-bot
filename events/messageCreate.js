@@ -187,6 +187,19 @@ async function processTip(message, db, sender, amount, currency, recipient, serv
       }
       
       db.users[actualSenderId].lastDonation = now
+      
+      // Apply streak bonuses if enabled
+      if (db.config?.featureToggles?.streakBonuses) {
+        const streakBonus = calculateStreakBonus(db.users[actualSenderId].donationStreak)
+        if (streakBonus > 0) {
+          // Initialize streak bonus tracking
+          if (!db.users[actualSenderId].streakBonusEntries) {
+            db.users[actualSenderId].streakBonusEntries = 0
+          }
+          db.users[actualSenderId].streakBonusEntries += streakBonus
+          logger.info(`User ${actualSenderId} earned ${streakBonus} bonus entries from ${db.users[actualSenderId].donationStreak}-day streak`)
+        }
+      }
     }
 
     // Add donation
@@ -464,4 +477,17 @@ async function updateDonorRoles(guild, userId, totalDonated) {
   } catch (error) {
     logger.error(`Error updating donor roles for user ${userId}:`, error)
   }
+}
+
+// Helper function to calculate streak bonus entries
+function calculateStreakBonus(streakDays) {
+  if (streakDays < 3) return 0
+  
+  // Bonus entries based on streak length
+  if (streakDays >= 30) return 20      // 30+ days: 20 bonus entries
+  if (streakDays >= 14) return 10      // 14+ days: 10 bonus entries
+  if (streakDays >= 7) return 5        // 7+ days: 5 bonus entries
+  if (streakDays >= 3) return 2        // 3+ days: 2 bonus entries
+  
+  return 0
 }
