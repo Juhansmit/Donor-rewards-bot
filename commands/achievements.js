@@ -1,7 +1,7 @@
 import { SlashCommandBuilder, EmbedBuilder } from 'discord.js'
 import { getDatabase } from '../utils/database.js'
 import { logger } from '../utils/logger.js'
-import { CONFIG, ACHIEVEMENTS } from '../config.js'
+import { CONFIG, ACHIEVEMENTS, DEFAULT_THEME } from '../config.js'
 
 export const data = new SlashCommandBuilder()
   .setName('achievements')
@@ -74,7 +74,7 @@ async function handleViewAchievements(interaction, db, userId) {
   const embed = new EmbedBuilder()
     .setTitle('🏆 Your Achievements')
     .setDescription(`You've earned **${earnedAchievements.length}/${totalAchievements}** achievements (${completionPercentage}%)`)
-    .setColor(CONFIG.DEFAULT_THEME.success)
+    .setColor(DEFAULT_THEME.success)
 
   // Group achievements by category or show all
   for (const achievementId of earnedAchievements) {
@@ -101,7 +101,7 @@ async function handleListAchievements(interaction) {
   const embed = new EmbedBuilder()
     .setTitle('🏆 All Achievements')
     .setDescription('Complete these challenges to earn special recognition!')
-    .setColor(CONFIG.DEFAULT_THEME.info)
+    .setColor(DEFAULT_THEME.info)
 
   for (const [achievementId, achievement] of Object.entries(ACHIEVEMENTS)) {
     embed.addFields({
@@ -138,7 +138,7 @@ async function handleProgress(interaction, db, userId) {
   const embed = new EmbedBuilder()
     .setTitle('📈 Achievement Progress')
     .setDescription('Here\'s what you can work towards next:')
-    .setColor(CONFIG.DEFAULT_THEME.accent)
+    .setColor(DEFAULT_THEME.accent)
 
   for (const [achievementId, achievement] of unearned.slice(0, 10)) { // Show max 10
     const progress = getAchievementProgress(achievement, userData)

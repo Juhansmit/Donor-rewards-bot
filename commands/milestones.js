@@ -1,7 +1,7 @@
 import { SlashCommandBuilder, EmbedBuilder } from 'discord.js'
 import { getDatabase } from '../utils/database.js'
 import { logger } from '../utils/logger.js'
-import { CONFIG } from '../config.js'
+import { CONFIG, DEFAULT_THEME } from '../config.js'
 
 export const data = new SlashCommandBuilder()
   .setName('milestones')
@@ -78,7 +78,7 @@ async function handleViewProgress(interaction, db, userId) {
   const embed = new EmbedBuilder()
     .setTitle('🎯 Your Milestone Progress')
     .setDescription(`Total Donated: **$${totalDonated.toFixed(2)}**`)
-    .setColor(CONFIG.DEFAULT_THEME.accent)
+    .setColor(DEFAULT_THEME.accent)
 
   if (currentMilestone) {
     embed.addFields({
@@ -125,7 +125,7 @@ async function handleListMilestones(interaction, db) {
   const embed = new EmbedBuilder()
     .setTitle('🎯 Donation Milestones')
     .setDescription('Complete these milestones to earn special rewards!')
-    .setColor(CONFIG.DEFAULT_THEME.info)
+    .setColor(DEFAULT_THEME.info)
 
   for (const milestone of milestones) {
     embed.addFields({

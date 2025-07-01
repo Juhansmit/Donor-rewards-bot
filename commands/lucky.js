@@ -1,7 +1,7 @@
 import { SlashCommandBuilder, EmbedBuilder } from 'discord.js'
 import { getDatabase, saveDatabase } from '../utils/database.js'
 import { logger } from '../utils/logger.js'
-import { CONFIG } from '../config.js'
+import { CONFIG, DEFAULT_THEME } from '../config.js'
 
 export const data = new SlashCommandBuilder()
   .setName('lucky')
@@ -129,7 +129,7 @@ async function handleSetNumbers(interaction, db, userId, serverId) {
       value: uniqueNumbers.map(n => `**${n}**`).join(', '),
       inline: false
     })
-    .setColor(CONFIG.DEFAULT_THEME.success)
+    .setColor(DEFAULT_THEME.success)
     .setFooter({ text: 'Lucky numbers give bonus entries when they match draw results!' })
 
   await interaction.reply({ embeds: [embed], ephemeral: true })
@@ -162,7 +162,7 @@ async function handleViewNumbers(interaction, db, userId) {
         inline: false
       }
     )
-    .setColor(CONFIG.DEFAULT_THEME.accent)
+    .setColor(DEFAULT_THEME.accent)
     .setFooter({ text: 'Use /lucky set to change your numbers' })
 
   await interaction.reply({ embeds: [embed], ephemeral: true })
@@ -189,7 +189,7 @@ async function handleInfo(interaction) {
         inline: false
       }
     )
-    .setColor(CONFIG.DEFAULT_THEME.info)
+    .setColor(DEFAULT_THEME.info)
     .setFooter({ text: 'Use /lucky set to choose your lucky numbers!' })
 
   await interaction.reply({ embeds: [embed], ephemeral: true })

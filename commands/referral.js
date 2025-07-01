@@ -1,7 +1,7 @@
 import { SlashCommandBuilder, EmbedBuilder } from 'discord.js'
 import { getDatabase, saveDatabase } from '../utils/database.js'
 import { logger } from '../utils/logger.js'
-import { CONFIG } from '../config.js'
+import { CONFIG, DEFAULT_THEME } from '../config.js'
 
 export const data = new SlashCommandBuilder()
   .setName('referral')
@@ -95,7 +95,7 @@ async function handleGetCode(interaction, db, userId, serverId) {
       { name: '👥 People Referred', value: `${db.users[userId].referrals?.referred?.length || 0}`, inline: true },
       { name: '🎁 Bonus Entries Earned', value: `${db.users[userId].referrals?.bonusEntries || 0}`, inline: true }
     )
-    .setColor(CONFIG.DEFAULT_THEME.primary)
+    .setColor(DEFAULT_THEME.primary)
     .setFooter({ text: 'Use /referral use <code> to use someone else\'s code' })
 
   await interaction.reply({ embeds: [embed], ephemeral: true })
@@ -172,7 +172,7 @@ async function handleUseCode(interaction, db, userId, serverId) {
       { name: '🎁 Bonus for Referrer', value: `${bonusEntries} bonus entries`, inline: true },
       { name: '💡 Your Benefit', value: 'Future referral bonuses unlocked!', inline: true }
     )
-    .setColor(CONFIG.DEFAULT_THEME.success)
+    .setColor(DEFAULT_THEME.success)
 
   await interaction.reply({ embeds: [embed], ephemeral: true })
 
@@ -215,7 +215,7 @@ async function handleStats(interaction, db, userId) {
       { name: '🎁 Bonus Entries Earned', value: `${bonusEntries}`, inline: true },
       { name: '🔗 Referred By', value: referredByText, inline: true }
     )
-    .setColor(CONFIG.DEFAULT_THEME.info)
+    .setColor(DEFAULT_THEME.info)
 
   if (referredCount > 0) {
     // Show referred users (up to 10)
