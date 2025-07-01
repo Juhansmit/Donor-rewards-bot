@@ -163,7 +163,24 @@ async function handleTipccDonation(message) {
     let entriesAdded = 0
     const entriesByDraw = {}
     
-    for (const [drawId, draw] of Object.entries(db.donationDraws)) {
+    // Check user's selected draw preference
+    const selectedDraw = db.users[senderId].selectedDraw || "auto"
+    
+    // Get eligible draws based on user preference
+    let eligibleDraws = []
+    
+    if (selectedDraw === "auto") {
+      // Automatic mode - check all draws
+      eligibleDraws = Object.entries(db.donationDraws)
+    } else {
+      // Specific draw selected - only check that draw
+      const draw = db.donationDraws[selectedDraw]
+      if (draw) {
+        eligibleDraws = [[selectedDraw, draw]]
+      }
+    }
+    
+    for (const [drawId, draw] of eligibleDraws) {
       if (!draw.active) continue
       if (usdValue < draw.minAmount || (draw.maxAmount && usdValue > draw.maxAmount)) continue
       if (draw.manualEntriesOnly) continue
@@ -194,8 +211,23 @@ async function handleTipccDonation(message) {
         }
       }
 
-      // Calculate entries
-      const entries = Math.floor(usdValue / draw.minAmount)
+      // Check global blacklist
+      if (db.config?.globalBlacklist) {
+        if (db.config.globalBlacklist.users && db.config.globalBlacklist.users.includes(senderId)) continue
+      }
+
+      // Calculate entries based on user preference
+      let entries
+      if (selectedDraw === "auto") {
+        // Automatic mode - calculate based on minimum amount
+        entries = Math.floor(usdValue / draw.minAmount)
+      } else {
+        // Specific draw mode - user gets to choose how many entries they want
+        // For now, we'll use all available entries, but this could be enhanced
+        // to allow users to specify entry count
+        entries = Math.floor(usdValue / draw.minAmount)
+      }
+      
       if (entries <= 0) continue
 
       // Check if draw has space
@@ -213,6 +245,9 @@ async function handleTipccDonation(message) {
       db.users[senderId].entries[drawId] += entriesToAdd
       entriesAdded += entriesToAdd
       entriesByDraw[drawId] = entriesToAdd
+      
+      // If user selected a specific draw, only process that one
+      if (selectedDraw !== "auto") break
     }
 
     // Add entry to history
