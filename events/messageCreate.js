@@ -23,17 +23,46 @@ async function handleTipccDonation(message) {
     const db = getDatabase(serverId)
 
     // Parse tip.cc message - improved regex pattern
-    // This pattern matches both standard tip.cc messages and custom tip messages
-    const tipRegex = /💰\s*\*\*(.+?)\*\*\s*(?:sent|tipped)\s*\*\*(.+?)\s*(.+?)\*\*\s*to\s*\*\*(.+?)\*\*/i
+    // This pattern matches tip.cc messages with custom emojis and user mentions
+    // Format: <emoji> <@user> sent <@recipient> **amount currency** (≈ $value).
+    const tipRegex = /<[a:]*\w+:\d+>\s*<@!?(\d+)>\s*sent\s*<@!?(\d+)>\s*\*\*([0-9.,]+)\s*(\w+)\*\*/i
     const match = message.content.match(tipRegex)
 
     if (!match) {
-      logger.debug(`No tip match found in message: ${message.content}`)
+      // Try alternative pattern for different tip.cc formats
+      const altRegex = /\*\*(.+?)\*\*\s*(?:sent|tipped)\s*\*\*([0-9.,]+)\s*(\w+)\*\*\s*to\s*\*\*(.+?)\*\*/i
+      const altMatch = message.content.match(altRegex)
+      
+      if (!altMatch) {
+        logger.debug(`No tip match found in message: ${message.content}`)
+        return
+      }
+      
+      const [, sender, amount, currency, recipient] = altMatch
+      await processTip(message, db, sender, amount, currency, recipient, serverId)
       return
     }
 
-    const [, sender, amount, currency, recipient] = match
-    logger.debug(`Detected tip: ${sender} sent ${amount} ${currency} to ${recipient}`)
+    const [, senderId, recipientId, amount, currency] = match
+    
+    // Get user objects from IDs
+    let sender, recipient
+    try {
+      sender = await message.client.users.fetch(senderId)
+      recipient = await message.client.users.fetch(recipientId)
+    } catch (error) {
+      logger.error("Error fetching users:", error)
+      return
+    }
+
+    logger.debug(`Detected tip: ${sender.username} sent ${amount} ${currency} to ${recipient.username}`)
+    await processTip(message, db, sender.username, amount, currency, recipient.username, serverId, senderId, recipientId)
+  } catch (error) {
+    logger.error("Error handling tip.cc donation:", error)
+  }
+}
+
+async function processTip(message, db, sender, amount, currency, recipient, serverId, senderId = null, recipientId = null) {
 
     // Check if recipient is in allowed recipients
     if (!db.config?.allowedRecipients?.length) {
@@ -79,32 +108,45 @@ async function handleTipccDonation(message) {
     // Find sender in guild - improved user matching
     const guild = message.guild
     let senderMember = null
+    let actualSenderId = senderId
     
-    // Try to find by exact username first
-    senderMember = guild.members.cache.find(member => 
-      member.user.username === sender || 
-      member.displayName === sender
-    )
-    
-    // If not found, try partial match
-    if (!senderMember) {
+    if (senderId) {
+      // We already have the sender ID from the regex match
+      try {
+        senderMember = await guild.members.fetch(senderId)
+      } catch (error) {
+        logger.debug(`Could not fetch member with ID ${senderId}`)
+      }
+    } else {
+      // Try to find by username (fallback for alternative regex)
       senderMember = guild.members.cache.find(member => 
-        member.user.username.toLowerCase().includes(sender.toLowerCase()) || 
-        member.displayName.toLowerCase().includes(sender.toLowerCase())
+        member.user.username === sender || 
+        member.displayName === sender
       )
+      
+      // If not found, try partial match
+      if (!senderMember) {
+        senderMember = guild.members.cache.find(member => 
+          member.user.username.toLowerCase().includes(sender.toLowerCase()) || 
+          member.displayName.toLowerCase().includes(sender.toLowerCase())
+        )
+      }
+      
+      if (senderMember) {
+        actualSenderId = senderMember.user.id
+      }
     }
 
-    if (!senderMember) {
-      logger.debug(`Could not find member matching sender name: ${sender}`)
+    if (!senderMember || !actualSenderId) {
+      logger.debug(`Could not find member matching sender: ${sender}`)
       return
     }
 
-    const senderId = senderMember.user.id
-    logger.debug(`Matched sender ${sender} to user ID ${senderId}`)
+    logger.debug(`Matched sender ${sender} to user ID ${actualSenderId}`)
 
     // Initialize user data if needed
-    if (!db.users[senderId]) {
-      db.users[senderId] = {
+    if (!db.users[actualSenderId]) {
+      db.users[actualSenderId] = {
         totalDonated: 0,
         entries: {},
         donations: [],
@@ -120,7 +162,7 @@ async function handleTipccDonation(message) {
     // Update donation streak if feature is enabled
     if (db.config?.featureToggles?.donationStreaks) {
       const now = Date.now()
-      const lastDonation = db.users[senderId].lastDonation
+      const lastDonation = db.users[actualSenderId].lastDonation
       
       if (lastDonation) {
         const oneDayMs = 24 * 60 * 60 * 1000
@@ -128,28 +170,28 @@ async function handleTipccDonation(message) {
         
         if (daysSinceLastDonation <= 1) {
           // Maintain or increase streak
-          db.users[senderId].donationStreak++
+          db.users[actualSenderId].donationStreak++
           
           // Update longest streak if current streak is longer
-          if (db.users[senderId].donationStreak > db.users[senderId].longestStreak) {
-            db.users[senderId].longestStreak = db.users[senderId].donationStreak
+          if (db.users[actualSenderId].donationStreak > db.users[actualSenderId].longestStreak) {
+            db.users[actualSenderId].longestStreak = db.users[actualSenderId].donationStreak
           }
         } else if (daysSinceLastDonation > 1) {
           // Reset streak
-          db.users[senderId].donationStreak = 1
+          db.users[actualSenderId].donationStreak = 1
         }
       } else {
         // First donation
-        db.users[senderId].donationStreak = 1
-        db.users[senderId].longestStreak = 1
+        db.users[actualSenderId].donationStreak = 1
+        db.users[actualSenderId].longestStreak = 1
       }
       
-      db.users[senderId].lastDonation = now
+      db.users[actualSenderId].lastDonation = now
     }
 
     // Add donation
-    db.users[senderId].totalDonated += usdValue
-    db.users[senderId].donations.push({
+    db.users[actualSenderId].totalDonated += usdValue
+    db.users[actualSenderId].donations.push({
       amount: usdValue,
       currency,
       originalAmount: parsedAmount,
@@ -164,7 +206,7 @@ async function handleTipccDonation(message) {
     const entriesByDraw = {}
     
     // Check user's selected draw preference
-    const selectedDraw = db.users[senderId].selectedDraw || "auto"
+    const selectedDraw = db.users[actualSenderId].selectedDraw || "auto"
     
     // Get eligible draws based on user preference
     let eligibleDraws = []
@@ -193,14 +235,14 @@ async function handleTipccDonation(message) {
 
       // Check donor tier requirement
       if (draw.minDonorTier) {
-        const userTier = getUserDonorTier(db.users[senderId].totalDonated)
+        const userTier = getUserDonorTier(db.users[actualSenderId].totalDonated)
         if (!userTier || !isTierEligible(userTier, draw.minDonorTier)) continue
       }
 
       // Check blacklist
       if (draw.blacklist) {
         // Check user blacklist
-        if (draw.blacklist.users && draw.blacklist.users.includes(senderId)) continue
+        if (draw.blacklist.users && draw.blacklist.users.includes(actualSenderId)) continue
         
         // Check role blacklist
         if (draw.blacklist.roles && draw.blacklist.roles.length > 0) {
@@ -213,7 +255,7 @@ async function handleTipccDonation(message) {
 
       // Check global blacklist
       if (db.config?.globalBlacklist) {
-        if (db.config.globalBlacklist.users && db.config.globalBlacklist.users.includes(senderId)) continue
+        if (db.config.globalBlacklist.users && db.config.globalBlacklist.users.some(entry => entry.id === actualSenderId)) continue
       }
 
       // Calculate entries based on user preference
@@ -236,13 +278,13 @@ async function handleTipccDonation(message) {
 
       // Add entries
       if (!draw.entries) draw.entries = {}
-      if (!draw.entries[senderId]) draw.entries[senderId] = 0
-      if (!db.users[senderId].entries) db.users[senderId].entries = {}
-      if (!db.users[senderId].entries[drawId]) db.users[senderId].entries[drawId] = 0
+      if (!draw.entries[actualSenderId]) draw.entries[actualSenderId] = 0
+      if (!db.users[actualSenderId].entries) db.users[actualSenderId].entries = {}
+      if (!db.users[actualSenderId].entries[drawId]) db.users[actualSenderId].entries[drawId] = 0
 
       const entriesToAdd = Math.min(entries, draw.maxEntries - currentEntries)
-      draw.entries[senderId] += entriesToAdd
-      db.users[senderId].entries[drawId] += entriesToAdd
+      draw.entries[actualSenderId] += entriesToAdd
+      db.users[actualSenderId].entries[drawId] += entriesToAdd
       entriesAdded += entriesToAdd
       entriesByDraw[drawId] = entriesToAdd
       
@@ -255,7 +297,7 @@ async function handleTipccDonation(message) {
       if (!db.entryHistory) db.entryHistory = []
       
       db.entryHistory.push({
-        userId: senderId,
+        userId: actualSenderId,
         username: senderMember.user.username,
         amount: usdValue,
         currency,
@@ -282,7 +324,7 @@ async function handleTipccDonation(message) {
     
     // Donor count
     if (!db.analytics.donorCount) db.analytics.donorCount = 0
-    if (db.users[senderId].donations.length === 1) {
+    if (db.users[actualSenderId].donations.length === 1) {
       db.analytics.donorCount++
     }
     
@@ -294,7 +336,7 @@ async function handleTipccDonation(message) {
 
     // Check for achievements
     if (db.config?.featureToggles?.achievementSystem) {
-      checkAndAwardAchievements(db, senderId)
+      checkAndAwardAchievements(db, actualSenderId)
     }
 
     // Save database
@@ -303,7 +345,7 @@ async function handleTipccDonation(message) {
     // Send confirmation
     if (entriesAdded > 0) {
       // Get display name that respects privacy settings
-      const displayName = getDisplayName(senderId, senderMember.user.username, db)
+      const displayName = getDisplayName(actualSenderId, senderMember.user.username, db)
       
       const confirmationMessage = `🎉 **${displayName}** donated **$${usdValue.toFixed(2)}** and received **${entriesAdded}** draw entries!\n\nUse \`/entries\` to see your entries.`
 
@@ -369,7 +411,7 @@ function checkAndAwardAchievements(db, userId) {
   if (!userData.achievements) userData.achievements = []
   
   // Import achievements from config
-  const { ACHIEVEMENTS } = require('../config.js')
+  const { ACHIEVEMENTS } = CONFIG
   
   // Check each achievement
   for (const [achievementId, achievement] of Object.entries(ACHIEVEMENTS)) {

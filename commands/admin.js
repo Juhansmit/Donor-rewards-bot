@@ -84,7 +84,10 @@ export const data = new SlashCommandBuilder()
       .setName("add_recipient")
       .setDescription("Add a donation recipient")
       .addStringOption((option) =>
-        option.setName("recipient").setDescription("Username or identifier of the recipient").setRequired(true),
+        option.setName("recipient").setDescription("Username or identifier of the recipient").setRequired(false),
+      )
+      .addRoleOption((option) =>
+        option.setName("role").setDescription("Role to add as recipient (will use role name)").setRequired(false),
       ),
   )
   .addSubcommand((subcommand) =>
@@ -606,7 +609,7 @@ async function handleAssignEntries(interaction, db) {
 
     // Check global blacklist
     if (db.config?.globalBlacklist) {
-      if (db.config.globalBlacklist.users && db.config.globalBlacklist.users.includes(targetUser.id)) {
+      if (db.config.globalBlacklist.users && db.config.globalBlacklist.users.some(entry => entry.id === targetUser.id)) {
         skippedUsers.push(`${targetUser.username} (globally blacklisted)`)
         continue
       }
@@ -674,17 +677,30 @@ async function handleAssignEntries(interaction, db) {
 
 async function handleAddRecipient(interaction, db) {
   const recipient = interaction.options.getString("recipient")
+  const role = interaction.options.getRole("role")
+
+  if (!recipient && !role) {
+    return interaction.reply({
+      content: "❌ You must specify either a recipient name or a role.",
+      flags: MessageFlags.Ephemeral,
+    })
+  }
 
   if (!db.config) db.config = {}
   if (!db.config.allowedRecipients) db.config.allowedRecipients = []
 
-  // Ensure recipients are stored as strings, not objects
-  const recipientStr = typeof recipient === 'string' ? recipient : recipient.toString()
+  // Determine the recipient string
+  let recipientStr
+  if (role) {
+    recipientStr = role.name
+  } else {
+    recipientStr = typeof recipient === 'string' ? recipient : recipient.toString()
+  }
   
   // Check if recipient already exists (handle both string and object formats)
   const existingRecipient = db.config.allowedRecipients.find(r => {
-    if (typeof r === 'string') return r === recipientStr
-    if (typeof r === 'object' && r.name) return r.name === recipientStr
+    if (typeof r === 'string') return r.toLowerCase() === recipientStr.toLowerCase()
+    if (typeof r === 'object' && r.name) return r.name.toLowerCase() === recipientStr.toLowerCase()
     return false
   })
 
@@ -696,14 +712,17 @@ async function handleAddRecipient(interaction, db) {
   }
 
   db.config.allowedRecipients.push(recipientStr)
-  saveDatabase(interaction.guildId, db)
 
   // Clean up any object recipients and convert to strings
   db.config.allowedRecipients = db.config.allowedRecipients.map(r => {
     if (typeof r === 'object' && r.name) return r.name
-    if (typeof r === 'object' && r.toString) return r.toString()
-    return r
-  }).filter(r => typeof r === 'string' && r.length > 0)
+    if (typeof r === 'object' && r.toString && r.toString() !== '[object Object]') return r.toString()
+    if (typeof r === 'string' && r.length > 0) return r
+    return null
+  }).filter(r => r !== null && r !== '[object Object]' && typeof r === 'string' && r.length > 0)
+
+  // Remove duplicates
+  db.config.allowedRecipients = [...new Set(db.config.allowedRecipients)]
 
   saveDatabase(interaction.guildId, db)
 
@@ -711,15 +730,14 @@ async function handleAddRecipient(interaction, db) {
     .setTitle("✅ Recipient Added")
     .setDescription(`**${recipientStr}** has been added to the allowed recipients list.`)
     .setColor(db.config?.theme?.success || "#4CAF50")
-    .addFields({
-      name: "📋 Current Recipients",
-      value: db.config.allowedRecipients.map((r) => `• ${r}`).join("\n") || "None",
-      inline: false,
-    })
+    .addFields(
+      { name: "📝 Type", value: role ? "Role" : "Username", inline: true },
+      { name: "📋 Current Recipients", value: db.config.allowedRecipients.map((r) => `• ${r}`).join("\n") || "None", inline: false }
+    )
     .setFooter({ text: "Powered By Aegisum Eco System" })
 
   await interaction.reply({ embeds: [embed] })
-  logger.info(`Recipient added: ${recipientStr} by ${interaction.user.tag}`)
+  logger.info(`Recipient added: ${recipientStr} (${role ? 'role' : 'username'}) by ${interaction.user.tag}`)
 }
 
 async function handleRemoveRecipient(interaction, db) {
@@ -732,11 +750,15 @@ async function handleRemoveRecipient(interaction, db) {
   // Clean up recipients first (convert objects to strings)
   db.config.allowedRecipients = db.config.allowedRecipients.map(r => {
     if (typeof r === 'object' && r.name) return r.name
-    if (typeof r === 'object' && r.toString) return r.toString()
-    return r
-  }).filter(r => typeof r === 'string' && r.length > 0)
+    if (typeof r === 'object' && r.toString && r.toString() !== '[object Object]') return r.toString()
+    if (typeof r === 'string' && r.length > 0) return r
+    return null
+  }).filter(r => r !== null && r !== '[object Object]' && typeof r === 'string' && r.length > 0)
 
-  const index = db.config.allowedRecipients.findIndex(r => r === recipient)
+  // Try to find the recipient (case-insensitive)
+  const index = db.config.allowedRecipients.findIndex(r => 
+    r.toLowerCase() === recipient.toLowerCase()
+  )
   if (index === -1) {
     return interaction.reply({
       content: `❌ **${recipient}** is not in the allowed recipients list.\n\nCurrent recipients:\n${db.config.allowedRecipients.map(r => `• ${r}`).join('\n') || 'None'}`,
