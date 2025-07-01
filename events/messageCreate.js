@@ -63,7 +63,7 @@ async function handleTipccDonation(message) {
 }
 
 async function processTip(message, db, sender, amount, currency, recipient, serverId, senderId = null, recipientId = null) {
-
+  try {
     // Check if recipient is in allowed recipients
     if (!db.config?.allowedRecipients?.length) {
       logger.debug("No allowed recipients configured")
@@ -339,6 +339,9 @@ async function processTip(message, db, sender, amount, currency, recipient, serv
       checkAndAwardAchievements(db, actualSenderId)
     }
 
+    // Update donor roles based on total donations
+    await updateDonorRoles(message.guild, actualSenderId, db.users[actualSenderId].totalDonated)
+
     // Save database
     saveDatabase(serverId, db)
 
@@ -424,5 +427,41 @@ function checkAndAwardAchievements(db, userId) {
       userData.achievements.push(achievementId)
       logger.info(`Awarded achievement ${achievement.name} to user ${userId}`)
     }
+  }
+}
+
+// Helper function to update donor roles based on total donations
+async function updateDonorRoles(guild, userId, totalDonated) {
+  try {
+    const member = await guild.members.fetch(userId)
+    if (!member) return
+
+    // Get the appropriate donor tier
+    const newTier = getUserDonorTier(totalDonated)
+    
+    // Get all donor role IDs
+    const allDonorRoleIds = Object.values(CONFIG.DONOR_ROLES).map(tier => tier.id)
+    
+    // Remove all existing donor roles
+    const rolesToRemove = member.roles.cache.filter(role => allDonorRoleIds.includes(role.id))
+    if (rolesToRemove.size > 0) {
+      await member.roles.remove(rolesToRemove, 'Updating donor tier')
+      logger.debug(`Removed ${rolesToRemove.size} old donor roles from ${member.user.username}`)
+    }
+    
+    // Add new donor role if user qualifies
+    if (newTier && CONFIG.DONOR_ROLES[newTier]) {
+      const newRoleId = CONFIG.DONOR_ROLES[newTier].id
+      const newRole = guild.roles.cache.get(newRoleId)
+      
+      if (newRole) {
+        await member.roles.add(newRole, `Qualified for ${CONFIG.DONOR_ROLES[newTier].name} with $${totalDonated.toFixed(2)} donated`)
+        logger.info(`Assigned ${CONFIG.DONOR_ROLES[newTier].name} role to ${member.user.username} (Total: $${totalDonated.toFixed(2)})`)
+      } else {
+        logger.warn(`Donor role ${newRoleId} not found in guild`)
+      }
+    }
+  } catch (error) {
+    logger.error(`Error updating donor roles for user ${userId}:`, error)
   }
 }
