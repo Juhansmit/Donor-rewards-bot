@@ -98,10 +98,13 @@ async function handleViewAchievements(interaction, db, userId) {
 }
 
 async function handleListAchievements(interaction) {
+  logger.debug('DEFAULT_THEME:', DEFAULT_THEME)
+  logger.debug('ACHIEVEMENTS:', Object.keys(ACHIEVEMENTS))
+  
   const embed = new EmbedBuilder()
     .setTitle('🏆 All Achievements')
     .setDescription('Complete these challenges to earn special recognition!')
-    .setColor(DEFAULT_THEME.info)
+    .setColor(DEFAULT_THEME?.info || '#00BCD4')
 
   for (const [achievementId, achievement] of Object.entries(ACHIEVEMENTS)) {
     embed.addFields({
@@ -138,7 +141,7 @@ async function handleProgress(interaction, db, userId) {
   const embed = new EmbedBuilder()
     .setTitle('📈 Achievement Progress')
     .setDescription('Here\'s what you can work towards next:')
-    .setColor(DEFAULT_THEME.accent)
+    .setColor(DEFAULT_THEME?.accent || '#FF9800')
 
   for (const [achievementId, achievement] of unearned.slice(0, 10)) { // Show max 10
     const progress = getAchievementProgress(achievement, userData)

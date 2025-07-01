@@ -202,6 +202,11 @@ async function processTip(message, db, sender, amount, currency, recipient, serv
       }
     }
 
+    // Ensure donations array exists
+    if (!db.users[actualSenderId].donations) {
+      db.users[actualSenderId].donations = []
+    }
+
     // Add donation
     db.users[actualSenderId].totalDonated += usdValue
     db.users[actualSenderId].donations.push({
