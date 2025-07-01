@@ -1,5 +1,5 @@
 import { SlashCommandBuilder, EmbedBuilder } from 'discord.js'
-import { loadDatabase } from '../utils/database.js'
+import { getDatabase } from '../utils/database.js'
 import { logger } from '../utils/logger.js'
 import { CONFIG, ACHIEVEMENTS } from '../config.js'
 
@@ -26,7 +26,7 @@ export async function execute(interaction) {
   try {
     const serverId = interaction.guild.id
     const userId = interaction.user.id
-    const db = loadDatabase(serverId)
+    const db = getDatabase(serverId)
 
     // Check if achievement system is enabled
     if (!db.config?.featureToggles?.achievementSystem) {

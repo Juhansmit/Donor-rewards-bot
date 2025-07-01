@@ -1,5 +1,5 @@
 import { SlashCommandBuilder, EmbedBuilder } from 'discord.js'
-import { loadDatabase, saveDatabase } from '../utils/database.js'
+import { getDatabase, saveDatabase } from '../utils/database.js'
 import { logger } from '../utils/logger.js'
 import { CONFIG } from '../config.js'
 
@@ -32,7 +32,7 @@ export async function execute(interaction) {
   try {
     const serverId = interaction.guild.id
     const userId = interaction.user.id
-    const db = loadDatabase(serverId)
+    const db = getDatabase(serverId)
 
     // Check if referral system is enabled
     if (!db.config?.featureToggles?.referralSystem) {
