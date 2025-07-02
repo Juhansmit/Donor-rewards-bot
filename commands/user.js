@@ -36,6 +36,19 @@ export const data = new SlashCommandBuilder()
           ),
       ),
   )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("donor_roles")
+      .setDescription("View and manage your donor roles")
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("achievements")
+      .setDescription("View your achievements")
+      .addUserOption((option) =>
+        option.setName("target").setDescription("User to view achievements for").setRequired(false)
+      )
+  )
 
 export async function execute(interaction) {
   try {
@@ -57,6 +70,12 @@ export async function execute(interaction) {
         break
       case "privacy":
         await handlePrivacy(interaction, db)
+        break
+      case "donor_roles":
+        await handleDonorRoles(interaction, db)
+        break
+      case "achievements":
+        await handleAchievements(interaction, db)
         break
       default:
         await interaction.reply({
@@ -302,4 +321,133 @@ async function handlePrivacy(interaction, db) {
       })
       break
   }
+}
+
+// Handle donor roles command
+async function handleDonorRoles(interaction, db) {
+  const userId = interaction.user.id
+  
+  // Initialize user if needed
+  if (!db.users[userId]) {
+    db.users[userId] = {
+      totalDonated: 0,
+      entries: {},
+      donations: [],
+      achievements: [],
+      privacyEnabled: false,
+      wins: 0
+    }
+  }
+  
+  const userData = db.users[userId]
+  const totalDonated = userData.totalDonated || 0
+  
+  // Get donor roles configuration
+  const donorRoles = db.config?.donorRoles || []
+  
+  const embed = new EmbedBuilder()
+    .setTitle('🏅 Donor Roles')
+    .setDescription(`You have donated a total of **$${totalDonated.toFixed(2)}**`)
+    .setColor('#FF9800')
+  
+  if (donorRoles.length === 0) {
+    embed.addFields({
+      name: 'No Donor Roles Configured',
+      value: 'The server admin has not set up any donor roles yet.'
+    })
+  } else {
+    // Current role
+    let currentRole = null
+    let nextRole = null
+    
+    for (const role of donorRoles.sort((a, b) => a.amount - b.amount)) {
+      if (totalDonated >= role.amount) {
+        currentRole = role
+      } else if (!nextRole) {
+        nextRole = role
+        break
+      }
+    }
+    
+    if (currentRole) {
+      embed.addFields({
+        name: '🎖️ Current Role',
+        value: `**${currentRole.name}** (Requires $${currentRole.amount})`
+      })
+    }
+    
+    if (nextRole) {
+      const amountNeeded = nextRole.amount - totalDonated
+      embed.addFields({
+        name: '⬆️ Next Role',
+        value: `**${nextRole.name}** (Requires $${nextRole.amount})\nNeeded: $${amountNeeded.toFixed(2)} more`
+      })
+    }
+    
+    // All roles
+    const allRolesField = {
+      name: '📋 All Donor Roles',
+      value: donorRoles.map(role => {
+        const emoji = totalDonated >= role.amount ? '✅' : '⬜'
+        return `${emoji} **${role.name}** - $${role.amount}`
+      }).join('\n')
+    }
+    
+    embed.addFields(allRolesField)
+  }
+  
+  await interaction.reply({
+    embeds: [embed],
+    flags: MessageFlags.Ephemeral
+  })
+}
+
+// Handle achievements command
+async function handleAchievements(interaction, db) {
+  const target = interaction.options.getUser('target') || interaction.user
+  const userId = target.id
+  
+  // Check if user exists in database
+  if (!db.users[userId]) {
+    return interaction.reply({
+      content: `❌ ${target.id === interaction.user.id ? 'You have' : 'This user has'} no donation history yet.`,
+      flags: MessageFlags.Ephemeral
+    })
+  }
+  
+  // Import achievements command functionality
+  const { ACHIEVEMENTS } = await import('../config.js')
+  const userData = db.users[userId]
+  
+  // Get earned achievements
+  const earnedAchievements = userData.achievements || []
+  
+  const embed = new EmbedBuilder()
+    .setTitle(`🏆 ${target.id === interaction.user.id ? 'Your' : `${target.username}'s`} Achievements`)
+    .setDescription(`${earnedAchievements.length} of ${Object.keys(ACHIEVEMENTS).length} achievements earned`)
+    .setColor('#FF9800')
+  
+  if (earnedAchievements.length === 0) {
+    embed.addFields({
+      name: 'No Achievements Yet',
+      value: 'Make donations to earn achievements!'
+    })
+  } else {
+    // Show earned achievements
+    for (const achievementId of earnedAchievements) {
+      const achievement = ACHIEVEMENTS[achievementId]
+      if (achievement) {
+        embed.addFields({
+          name: `${achievement.icon} ${achievement.name}`,
+          value: achievement.description,
+          inline: true
+        })
+      }
+    }
+  }
+  
+  await interaction.reply({
+    embeds: [embed],
+    flags: MessageFlags.Ephemeral
+  })
 }

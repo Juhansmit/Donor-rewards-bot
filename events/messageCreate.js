@@ -346,9 +346,13 @@ async function processTip(message, db, sender, amount, currency, recipient, serv
       db.analytics.donorCount++
     }
     
-    // Average donation
-    const totalDonations = Object.values(db.users).reduce((sum, user) => sum + user.donations.length, 0)
-    const totalAmount = Object.values(db.users).reduce((sum, user) => sum + user.totalDonated, 0)
+    // Average donation - with safety checks
+    const totalDonations = Object.values(db.users).reduce((sum, user) => {
+      return sum + (user.donations?.length || 0)
+    }, 0)
+    const totalAmount = Object.values(db.users).reduce((sum, user) => {
+      return sum + (user.totalDonated || 0)
+    }, 0)
     db.analytics.averageDonation = totalAmount / (totalDonations || 1)
     db.analytics.lastUpdated = Date.now()
 
