@@ -1,5 +1,5 @@
 import fetch from 'node-fetch';
-import { logError, info } from './logger.js';
+import { logger } from './logger.js';
 
 // API Configuration
 const API_KEYS = {
@@ -81,7 +81,7 @@ async function getPriceFromCoinGecko(symbol) {
     const data = await response.json();
     
     if (data[coinId] && data[coinId].usd) {
-      info(`CoinGecko price for ${symbol}: $${data[coinId].usd}`);
+      logger.debug(`CoinGecko price for ${symbol}: $${data[coinId].usd}`);
       return data[coinId].usd;
     }
     
@@ -89,7 +89,7 @@ async function getPriceFromCoinGecko(symbol) {
     return await searchCoinGecko(symbol);
     
   } catch (error) {
-    logError(`CoinGecko error for ${symbol}: ${error.message}`);
+    logger.error(`CoinGecko error for ${symbol}: ${error.message}`);
     return null;
   }
 }
@@ -135,13 +135,13 @@ async function searchCoinGecko(symbol) {
     const priceData = await priceResponse.json();
     
     if (priceData[coinId] && priceData[coinId].usd) {
-      info(`CoinGecko search price for ${symbol}: $${priceData[coinId].usd}`);
+      logger.debug(`CoinGecko search price for ${symbol}: $${priceData[coinId].usd}`);
       return priceData[coinId].usd;
     }
     
     return null;
   } catch (error) {
-    logError(`CoinGecko search error for ${symbol}: ${error.message}`);
+    logger.error(`CoinGecko search error for ${symbol}: ${error.message}`);
     return null;
   }
 }
@@ -180,13 +180,13 @@ async function getPriceFromCoinMarketCap(symbol) {
         data.data[normalizedSymbol].quote && 
         data.data[normalizedSymbol].quote.USD) {
       const price = data.data[normalizedSymbol].quote.USD.price;
-      info(`CoinMarketCap price for ${symbol}: $${price}`);
+      logger.debug(`CoinMarketCap price for ${symbol}: $${price}`);
       return price;
     }
     
     return null;
   } catch (error) {
-    logError(`CoinMarketCap error for ${symbol}: ${error.message}`);
+    logger.error(`CoinMarketCap error for ${symbol}: ${error.message}`);
     return null;
   }
 }
@@ -200,7 +200,7 @@ async function getPriceFromCoinMarketCap(symbol) {
 export function extractPriceFromTipMessage(message, cryptoAmount) {
   try {
     // Look for patterns like "(≈ $1.00)" in the message
-    const usdPattern = /$$≈\s*\$([0-9,.]+)$$/i;
+    const usdPattern = /\(\s*≈\s*\$([0-9,.]+)\s*\)/i;
     const match = message.match(usdPattern);
     
     if (match && match[1] && cryptoAmount > 0) {
@@ -208,13 +208,13 @@ export function extractPriceFromTipMessage(message, cryptoAmount) {
       const totalUsdValue = parseFloat(match[1].replace(/,/g, ''));
       const pricePerUnit = totalUsdValue / cryptoAmount;
       
-      info(`Extracted price from tip.cc message: $${pricePerUnit}`);
+      logger.debug(`Extracted price from tip.cc message: $${pricePerUnit}`);
       return pricePerUnit;
     }
     
     return null;
   } catch (error) {
-    logError(`Error extracting price from tip.cc message: ${error.message}`);
+    logger.error(`Error extracting price from tip.cc message: ${error.message}`);
     return null;
   }
 }
@@ -222,25 +222,25 @@ export function extractPriceFromTipMessage(message, cryptoAmount) {
 /**
  * Get cryptocurrency price from all available APIs with fallbacks
  * @param {string} symbol - Cryptocurrency symbol
+ * @param {number} cryptoAmount - The cryptocurrency amount
  * @param {string} [tipMessage] - Optional tip.cc message for price extraction
- * @param {number} [cryptoAmount] - Optional crypto amount for price calculation
  * @returns {Promise<number|null>} - Price in USD or null if not found
  */
-export async function getCryptoPrice(symbol, tipMessage = null, cryptoAmount = null) {
+export async function getCryptoPrice(symbol, cryptoAmount = null, tipMessage = null) {
   if (!symbol) return null;
   
   const normalizedSymbol = symbol.toUpperCase();
   
   // Check for manual price override first
   if (MANUAL_PRICE_OVERRIDES[normalizedSymbol]) {
-    info(`Using manual price override for ${normalizedSymbol}: $${MANUAL_PRICE_OVERRIDES[normalizedSymbol]}`);
+    logger.debug(`Using manual price override for ${normalizedSymbol}: $${MANUAL_PRICE_OVERRIDES[normalizedSymbol]}`);
     return MANUAL_PRICE_OVERRIDES[normalizedSymbol];
   }
   
   // Check cache next
   if (priceCache.prices[normalizedSymbol] && 
       (Date.now() - priceCache.lastUpdated[normalizedSymbol] < CACHE_EXPIRY)) {
-    info(`Using cached price for ${normalizedSymbol}: $${priceCache.prices[normalizedSymbol]}`);
+    logger.debug(`Using cached price for ${normalizedSymbol}: $${priceCache.prices[normalizedSymbol]}`);
     return priceCache.prices[normalizedSymbol];
   }
   
@@ -269,7 +269,7 @@ export async function getCryptoPrice(symbol, tipMessage = null, cryptoAmount = n
     const priceDifference = Math.abs(tipPrice - apiPrice) / Math.max(tipPrice, apiPrice);
     
     if (priceDifference > 0.2) { // If more than 20% difference
-      info(`Large price discrepancy for ${normalizedSymbol}: tip.cc $${tipPrice} vs API $${apiPrice}`);
+      logger.debug(`Large price discrepancy for ${normalizedSymbol}: tip.cc $${tipPrice} vs API $${apiPrice}`);
       // Prefer tip.cc price for meme coins and tokens
       if (['PEPE', 'SHIB', 'DOGE', 'SHIC', 'BONC'].includes(normalizedSymbol)) {
         finalPrice = tipPrice;
@@ -295,12 +295,29 @@ export async function getCryptoPrice(symbol, tipMessage = null, cryptoAmount = n
 }
 
 /**
+ * Get multiple cryptocurrency prices at once
+ * @param {string[]} symbols - Array of cryptocurrency symbols
+ * @returns {Promise<Object>} - Object mapping symbols to prices
+ */
+export async function getMultipleCryptoPrices(symbols) {
+  const prices = {};
+  
+  for (const symbol of symbols) {
+    if (!symbol) continue;
+    const normalizedSymbol = symbol.toUpperCase();
+    prices[normalizedSymbol] = await getCryptoPrice(normalizedSymbol);
+  }
+  
+  return prices;
+}
+
+/**
  * Clear the price cache
  */
 export function clearPriceCache() {
   priceCache.prices = {};
   priceCache.lastUpdated = {};
-  info('Price cache cleared');
+  logger.debug('Price cache cleared');
 }
 
 /**

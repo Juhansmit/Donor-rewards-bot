@@ -97,6 +97,11 @@ export const data = new SlashCommandBuilder()
   )
   .addSubcommand((subcommand) =>
     subcommand
+      .setName("clean_recipients")
+      .setDescription("Clean up and fix recipient list (removes [object Object] entries)"),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
       .setName("edit_draw")
       .setDescription("Edit an existing draw")
       .addStringOption((option) => option.setName("draw_id").setDescription("ID of the draw to edit").setRequired(true))
@@ -198,6 +203,9 @@ export async function execute(interaction) {
         break
       case "remove_recipient":
         await handleRemoveRecipient(interaction, db)
+        break
+      case "clean_recipients":
+        await handleCleanRecipients(interaction, db)
         break
       case "edit_draw":
         await handleEditDraw(interaction, db)
@@ -569,9 +577,41 @@ async function handleAssignEntries(interaction, db) {
   if (!draw.entries) draw.entries = {}
 
   let assignedCount = 0
+  let skippedUsers = []
 
   // Assign entries to each target user
   for (const targetUser of targetUsers) {
+    // Check if user is blacklisted for this specific draw
+    if (draw.blacklist) {
+      // Check user blacklist
+      if (draw.blacklist.users && draw.blacklist.users.includes(targetUser.id)) {
+        skippedUsers.push(`${targetUser.username} (blacklisted)`)
+        continue
+      }
+      
+      // Check role blacklist
+      if (draw.blacklist.roles && draw.blacklist.roles.length > 0) {
+        const member = await interaction.guild.members.fetch(targetUser.id).catch(() => null)
+        if (member) {
+          const hasBlacklistedRole = draw.blacklist.roles.some(roleId => 
+            member.roles.cache.has(roleId)
+          )
+          if (hasBlacklistedRole) {
+            skippedUsers.push(`${targetUser.username} (blacklisted role)`)
+            continue
+          }
+        }
+      }
+    }
+
+    // Check global blacklist
+    if (db.config?.globalBlacklist) {
+      if (db.config.globalBlacklist.users && db.config.globalBlacklist.users.includes(targetUser.id)) {
+        skippedUsers.push(`${targetUser.username} (globally blacklisted)`)
+        continue
+      }
+    }
+
     // Initialize user data
     if (!db.users[targetUser.id]) {
       db.users[targetUser.id] = {
@@ -596,6 +636,8 @@ async function handleAssignEntries(interaction, db) {
 
   saveDatabase(interaction.guildId, db)
 
+  const actualEntriesAdded = assignedCount * entries
+  
   const embed = new EmbedBuilder()
     .setTitle("✅ Entries Assigned")
     .setDescription(`Successfully assigned **${entries}** entries each to **${assignedCount}** user(s)`)
@@ -604,9 +646,17 @@ async function handleAssignEntries(interaction, db) {
       { name: "🎁 Draw", value: draw.name, inline: true },
       { name: "🎟️ Entries Per User", value: entries.toString(), inline: true },
       { name: "👥 Users Affected", value: assignedCount.toString(), inline: true },
-      { name: "📊 Total Entries Added", value: totalNewEntries.toString(), inline: true },
+      { name: "📊 Total Entries Added", value: actualEntriesAdded.toString(), inline: true },
       { name: "📝 Reason", value: reason, inline: false },
     )
+
+  if (skippedUsers.length > 0) {
+    embed.addFields({
+      name: "⚠️ Skipped Users",
+      value: skippedUsers.slice(0, 10).join('\n') + (skippedUsers.length > 10 ? `\n... and ${skippedUsers.length - 10} more` : ''),
+      inline: false
+    })
+  }
 
   if (role) {
     embed.addFields({ name: "🏷️ Role", value: `<@&${role.id}>`, inline: true })
@@ -628,19 +678,38 @@ async function handleAddRecipient(interaction, db) {
   if (!db.config) db.config = {}
   if (!db.config.allowedRecipients) db.config.allowedRecipients = []
 
-  if (db.config.allowedRecipients.includes(recipient)) {
+  // Ensure recipients are stored as strings, not objects
+  const recipientStr = typeof recipient === 'string' ? recipient : recipient.toString()
+  
+  // Check if recipient already exists (handle both string and object formats)
+  const existingRecipient = db.config.allowedRecipients.find(r => {
+    if (typeof r === 'string') return r === recipientStr
+    if (typeof r === 'object' && r.name) return r.name === recipientStr
+    return false
+  })
+
+  if (existingRecipient) {
     return interaction.reply({
-      content: `❌ **${recipient}** is already in the allowed recipients list.`,
+      content: `❌ **${recipientStr}** is already in the allowed recipients list.`,
       flags: MessageFlags.Ephemeral,
     })
   }
 
-  db.config.allowedRecipients.push(recipient)
+  db.config.allowedRecipients.push(recipientStr)
+  saveDatabase(interaction.guildId, db)
+
+  // Clean up any object recipients and convert to strings
+  db.config.allowedRecipients = db.config.allowedRecipients.map(r => {
+    if (typeof r === 'object' && r.name) return r.name
+    if (typeof r === 'object' && r.toString) return r.toString()
+    return r
+  }).filter(r => typeof r === 'string' && r.length > 0)
+
   saveDatabase(interaction.guildId, db)
 
   const embed = new EmbedBuilder()
     .setTitle("✅ Recipient Added")
-    .setDescription(`**${recipient}** has been added to the allowed recipients list.`)
+    .setDescription(`**${recipientStr}** has been added to the allowed recipients list.`)
     .setColor(db.config?.theme?.success || "#4CAF50")
     .addFields({
       name: "📋 Current Recipients",
@@ -650,7 +719,7 @@ async function handleAddRecipient(interaction, db) {
     .setFooter({ text: "Powered By Aegisum Eco System" })
 
   await interaction.reply({ embeds: [embed] })
-  logger.info(`Recipient added: ${recipient} by ${interaction.user.tag}`)
+  logger.info(`Recipient added: ${recipientStr} by ${interaction.user.tag}`)
 }
 
 async function handleRemoveRecipient(interaction, db) {
@@ -660,10 +729,17 @@ async function handleRemoveRecipient(interaction, db) {
     return interaction.reply({ content: "❌ No recipients configured.", flags: MessageFlags.Ephemeral })
   }
 
-  const index = db.config.allowedRecipients.indexOf(recipient)
+  // Clean up recipients first (convert objects to strings)
+  db.config.allowedRecipients = db.config.allowedRecipients.map(r => {
+    if (typeof r === 'object' && r.name) return r.name
+    if (typeof r === 'object' && r.toString) return r.toString()
+    return r
+  }).filter(r => typeof r === 'string' && r.length > 0)
+
+  const index = db.config.allowedRecipients.findIndex(r => r === recipient)
   if (index === -1) {
     return interaction.reply({
-      content: `❌ **${recipient}** is not in the allowed recipients list.`,
+      content: `❌ **${recipient}** is not in the allowed recipients list.\n\nCurrent recipients:\n${db.config.allowedRecipients.map(r => `• ${r}`).join('\n') || 'None'}`,
       flags: MessageFlags.Ephemeral,
     })
   }
@@ -684,6 +760,50 @@ async function handleRemoveRecipient(interaction, db) {
 
   await interaction.reply({ embeds: [embed] })
   logger.info(`Recipient removed: ${recipient} by ${interaction.user.tag}`)
+}
+
+async function handleCleanRecipients(interaction, db) {
+  if (!db.config?.allowedRecipients) {
+    return interaction.reply({ content: "❌ No recipients configured.", flags: MessageFlags.Ephemeral })
+  }
+
+  const originalRecipients = [...db.config.allowedRecipients]
+  const originalCount = originalRecipients.length
+
+  // Clean up recipients (convert objects to strings and remove invalid entries)
+  db.config.allowedRecipients = db.config.allowedRecipients.map(r => {
+    if (typeof r === 'object' && r.name) return r.name
+    if (typeof r === 'object' && r.toString && r.toString() !== '[object Object]') return r.toString()
+    if (typeof r === 'string' && r.length > 0) return r
+    return null
+  }).filter(r => r !== null && r !== '[object Object]' && typeof r === 'string' && r.length > 0)
+
+  // Remove duplicates
+  db.config.allowedRecipients = [...new Set(db.config.allowedRecipients)]
+
+  const cleanedCount = db.config.allowedRecipients.length
+  const removedCount = originalCount - cleanedCount
+
+  saveDatabase(interaction.guildId, db)
+
+  const embed = new EmbedBuilder()
+    .setTitle("✅ Recipients Cleaned")
+    .setDescription(`Cleaned up recipient list. Removed ${removedCount} invalid entries.`)
+    .setColor(db.config?.theme?.success || "#4CAF50")
+    .addFields(
+      { name: "📊 Before", value: originalCount.toString(), inline: true },
+      { name: "📊 After", value: cleanedCount.toString(), inline: true },
+      { name: "🗑️ Removed", value: removedCount.toString(), inline: true },
+    )
+    .addFields({
+      name: "📋 Current Recipients",
+      value: db.config.allowedRecipients.map((r) => `• ${r}`).join("\n") || "None",
+      inline: false,
+    })
+    .setFooter({ text: "Powered By Aegisum Eco System" })
+
+  await interaction.reply({ embeds: [embed] })
+  logger.info(`Recipients cleaned: removed ${removedCount} invalid entries by ${interaction.user.tag}`)
 }
 
 async function handleEditDraw(interaction, db) {
